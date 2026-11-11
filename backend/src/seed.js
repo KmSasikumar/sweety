@@ -21,34 +21,38 @@ function around(base, spread) {
   return Math.round(base + (rand() * 2 - 1) * spread);
 }
 
-// A realistic day: fasting in the morning, after lunch, and bedtime on most days.
-// Values span 64–192 mg/dL like the reference demo — mostly in range, with
-// the occasional post-meal spike above 180 and a rare dip below 70.
+// A realistic day in Kenpath's 4 slots: a fasting morning reading, an
+// after-lunch reading and an after-dinner reading on most days, with an
+// after-breakfast reading on about half the days — never more than 4.
+// Values span 64–192 mg/dL — mostly in range, with the occasional
+// post-meal spike above 180 and a rare dip below 70.
 function readingsForDay(date, dayIndex) {
   const isWeekend = date.getDay() === 0 || date.getDay() === 6;
   const bump = isWeekend ? 5 : 0;
   const out = [
-    { hour: 7, minute: 15, context: 'fasting', value: around(97 + bump, 10) },
-    { hour: 14, minute: 30, context: 'after_meal', value: around(148 + bump, 18) },
+    { slot: 'morning', value: around(97 + bump, 10) },
+    { slot: 'after_lunch', value: around(148 + bump, 18) },
+    { slot: 'after_dinner', value: around(122 + bump, 12) },
   ];
   if (dayIndex % 2 === 0) {
-    out.push({ hour: 22, minute: 10, context: 'bedtime', value: around(122 + bump, 12) });
+    out.splice(1, 0, { slot: 'after_breakfast', value: around(135 + bump, 15) });
   }
-  // A couple of deliberate outliers across the two weeks, like the reference data.
-  if (dayIndex === 3) out[1].value = 192; // spike after pizza
-  if (dayIndex === 8) out[1].value = 186; // post-meal spike
-  if (dayIndex === 11) out[0].value = 64; // low fasting morning
-  if (dayIndex === 5 && out[2]) out[2].value = 178;
+  // A couple of deliberate outliers across the two weeks.
+  if (dayIndex === 3) out.find((r) => r.slot === 'after_lunch').value = 192; // spike after pizza
+  if (dayIndex === 8) out.find((r) => r.slot === 'after_lunch').value = 186; // post-meal spike
+  if (dayIndex === 11) out.find((r) => r.slot === 'morning').value = 64; // low fasting morning
+  if (dayIndex === 5) out.find((r) => r.slot === 'after_dinner').value = 178;
   return out.map((r) => ({
     ...r,
-    at: new Date(date.getFullYear(), date.getMonth(), date.getDate(), r.hour, r.minute),
+    date: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
   }));
 }
 
 const NOTES = {
-  fasting: ['Slept well', 'Woke up early', '', ''],
-  after_meal: ['After lunch', 'Post-meal spike', 'Spike after pizza', 'Ate out — dosa', 'Stressful day', ''],
-  bedtime: ['Evening walk done', '', 'Felt a little tired today', ''],
+  morning: ['Slept well', 'Woke up early', '', ''],
+  after_breakfast: ['Idli + sambar', 'Upma for breakfast', '', ''],
+  after_lunch: ['After lunch', 'Post-meal spike', 'Spike after pizza', 'Ate out — dosa', 'Stressful day', ''],
+  after_dinner: ['Evening walk done', '', 'Felt a little tired today', 'Light dinner', ''],
 };
 
 async function main() {
@@ -73,15 +77,15 @@ async function main() {
   for (let dayOffset = 13; dayOffset >= 0; dayOffset -= 1) {
     const day = new Date(today);
     day.setDate(day.getDate() - dayOffset);
-    // Do not seed readings later than "now" on the current day.
     for (const r of readingsForDay(day, 13 - dayOffset)) {
-      if (r.at > new Date()) continue;
-      const notesPool = NOTES[r.context] || [''];
+      const notesPool = NOTES[r.slot] || [''];
       const note = notesPool[Math.floor(rand() * notesPool.length)];
+      const pad = (n) => String(n).padStart(2, '0');
+      const dateStr = `${r.date.getFullYear()}-${pad(r.date.getMonth() + 1)}-${pad(r.date.getDate())}`;
       await pool.query(
-        `INSERT INTO readings (user_id, glucose_mg_dl, measured_at, meal_context, notes)
+        `INSERT INTO readings (user_id, glucose_mg_dl, reading_date, time_slot, notes)
          VALUES ($1, $2, $3, $4, $5)`,
-        [user.id, r.value, r.at.toISOString(), r.context, note],
+        [user.id, r.value, dateStr, r.slot, note],
       );
       inserted += 1;
     }

@@ -546,29 +546,24 @@ button {
   vertical-align: 1px;
 }
 
-.meal-tag.fasting {
+.meal-tag.morning {
   background: var(--green-soft);
   color: var(--green);
 }
 
-.meal-tag.before_meal {
+.meal-tag.after_breakfast {
   background: var(--blue-soft);
   color: var(--blue);
 }
 
-.meal-tag.after_meal {
+.meal-tag.after_lunch {
   background: var(--accent-soft);
   color: var(--accent-dark);
 }
 
-.meal-tag.bedtime {
+.meal-tag.after_dinner {
   background: var(--purple-soft);
   color: var(--purple);
-}
-
-.meal-tag.other {
-  background: var(--bg);
-  color: var(--ink-soft);
 }
 
 .reading-actions {
@@ -629,22 +624,22 @@ button {
   border-width: 1px;
 }
 
-.pill.meal.active[data-meal='fasting'] {
+.pill.meal.active[data-meal='morning'] {
   background: var(--green);
   border-color: var(--green);
 }
 
-.pill.meal.active[data-meal='before_meal'] {
+.pill.meal.active[data-meal='after_breakfast'] {
   background: var(--blue);
   border-color: var(--blue);
 }
 
-.pill.meal.active[data-meal='after_meal'] {
+.pill.meal.active[data-meal='after_lunch'] {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-.pill.meal.active[data-meal='bedtime'] {
+.pill.meal.active[data-meal='after_dinner'] {
   background: var(--purple);
   border-color: var(--purple);
 }

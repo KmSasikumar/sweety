@@ -44,33 +44,50 @@ export const api = {
   deleteReading: (id) => request(`/readings/${id}`, { method: 'DELETE' }),
   stats: () => request('/stats'),
   dailyReport: (date) => request(`/reports/daily?date=${date}`),
+  monthToDateReport: (date) => request(`/reports/month-to-date?date=${date}`),
   monthlyReport: (year, month) => request(`/reports/monthly?year=${year}&month=${month}`),
 };
 
-export const MEAL_LABELS = {
-  fasting: 'Fasting',
-  before_meal: 'Before meal',
-  after_meal: 'After meal',
-  bedtime: 'Bedtime',
-  other: 'Other',
+// Kenpath's 4 time slots.
+export const TIME_SLOTS = ['morning', 'after_breakfast', 'after_lunch', 'after_dinner'];
+
+export const SLOT_LABELS = {
+  morning: 'Morning (fasting)',
+  after_breakfast: 'After breakfast',
+  after_lunch: 'After lunch',
+  after_dinner: 'After dinner',
 };
 
+// Short names used in validation messages, e.g.
+// "You already have an After lunch reading for this date."
+export const SLOT_SHORT = {
+  morning: 'Morning',
+  after_breakfast: 'After breakfast',
+  after_lunch: 'After lunch',
+  after_dinner: 'After dinner',
+};
+
+// "a" vs "an" for a slot name, e.g. "a Morning reading", "an After lunch reading".
+export function slotArticle(slot) {
+  return /^[AEIOU]/i.test(SLOT_SHORT[slot] || '') ? 'an' : 'a';
+}
+
+// Format a YYYY-MM-DD date (or an ISO timestamp) as e.g. "11 Nov 2026".
+// Parses the date parts directly so the displayed day never shifts with timezone.
+export function formatDay(value) {
+  if (!value) return '';
+  const datePart = String(value).slice(0, 10);
+  const [y, m, d] = datePart.split('-').map(Number);
+  if (!y || !m || !d) return datePart;
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export function formatDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-export function formatTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-}
-
-export function toLocalInputValue(iso) {
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours(),
-  )}:${pad(d.getMinutes())}`;
+  return formatDay(iso);
 }
 
 export function todayISODate() {

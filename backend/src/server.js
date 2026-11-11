@@ -1,6 +1,6 @@
 // Sweety API — Express + PostgreSQL.
 // Routes: auth (signup/login/me), readings CRUD, dashboard stats,
-// daily + monthly reports. All readings live in PostgreSQL.
+// daily / month-to-date / monthly reports. All readings live in PostgreSQL.
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -12,36 +12,78 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const MEAL_CONTEXTS = ['fasting', 'before_meal', 'after_meal', 'bedtime', 'other'];
+// Kenpath's 4 time slots, in the order they occur in a day.
+const TIME_SLOTS = ['morning', 'after_breakfast', 'after_lunch', 'after_dinner'];
+const SLOT_LABELS = {
+  morning: 'Morning (fasting)',
+  after_breakfast: 'After breakfast',
+  after_lunch: 'After lunch',
+  after_dinner: 'After dinner',
+};
+// Short names used in validation messages, e.g.
+// "You already have an After lunch reading for this date."
+const SLOT_SHORT = {
+  morning: 'Morning',
+  after_breakfast: 'After breakfast',
+  after_lunch: 'After lunch',
+  after_dinner: 'After dinner',
+};
+const SLOT_ORDER_SQL =
+  "CASE time_slot WHEN 'morning' THEN 1 WHEN 'after_breakfast' THEN 2 WHEN 'after_lunch' THEN 3 ELSE 4 END";
 
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function isValidDateString(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+}
+
+// Shape validation for a reading payload. The full Kenpath validation
+// rules (required value, 40–600 range, future date, one per slot per day,
+// max 4 per day) live in validateReading(); this only checks the payload
+// has the right shape so the DB is never hit with garbage.
 function parseReadingInput(body) {
   const glucose = Number(body.glucose_mg_dl);
-  const mealContext = MEAL_CONTEXTS.includes(body.meal_context)
-    ? body.meal_context
-    : 'fasting';
-  const measuredAt = body.measured_at ? new Date(body.measured_at) : null;
+  const timeSlot = TIME_SLOTS.includes(body.time_slot) ? body.time_slot : null;
+  const readingDate = isValidDateString(body.reading_date) ? body.reading_date : null;
   const notes = typeof body.notes === 'string' ? body.notes.slice(0, 500) : '';
-  if (!Number.isInteger(glucose) || glucose <= 0 || glucose >= 1000) {
-    return { error: 'glucose_mg_dl must be an integer between 1 and 999' };
+  if (!Number.isInteger(glucose)) {
+    return { error: 'glucose_mg_dl must be a whole number' };
   }
-  if (!measuredAt || Number.isNaN(measuredAt.getTime())) {
-    return { error: 'measured_at must be a valid date/time' };
+  if (!timeSlot) {
+    return { error: 'time_slot must be one of: morning, after_breakfast, after_lunch, after_dinner' };
   }
-  return { value: { glucose, mealContext, measuredAt, notes } };
+  if (!readingDate) {
+    return { error: 'reading_date must be YYYY-MM-DD' };
+  }
+  return { value: { glucose, timeSlot, readingDate, notes } };
 }
 
 function toReadingRow(row) {
   return {
     id: row.id,
     glucose_mg_dl: row.glucose_mg_dl,
-    measured_at: row.measured_at,
-    meal_context: row.meal_context,
+    reading_date: row.reading_date,
+    time_slot: row.time_slot,
     notes: row.notes,
     created_at: row.created_at,
+  };
+}
+
+// Round an average to 1 decimal place (Kenpath's report format).
+function avg1(values) {
+  if (!values.length) return null;
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+}
+
+function summaryOf(values) {
+  if (!values.length) return { count: 0, avg: null, min: null, max: null };
+  return {
+    count: values.length,
+    avg: avg1(values),
+    min: Math.min(...values),
+    max: Math.max(...values),
   };
 }
 
@@ -107,7 +149,7 @@ app.get('/api/readings', requireAuth, async (req, res) => {
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const { rows } = await pool.query(
     `SELECT * FROM readings WHERE user_id = $1
-     ORDER BY measured_at DESC, id DESC LIMIT $2 OFFSET $3`,
+     ORDER BY reading_date DESC, ${SLOT_ORDER_SQL} DESC LIMIT $2 OFFSET $3`,
     [req.user.id, limit, offset],
   );
   const total = await pool.query(
@@ -120,28 +162,48 @@ app.get('/api/readings', requireAuth, async (req, res) => {
 app.post('/api/readings', requireAuth, async (req, res) => {
   const parsed = parseReadingInput(req.body || {});
   if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const { glucose, mealContext, measuredAt, notes } = parsed.value;
-  const { rows } = await pool.query(
-    `INSERT INTO readings (user_id, glucose_mg_dl, measured_at, meal_context, notes)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [req.user.id, glucose, measuredAt.toISOString(), mealContext, notes],
-  );
-  return res.status(201).json({ reading: toReadingRow(rows[0]) });
+  const { glucose, timeSlot, readingDate, notes } = parsed.value;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO readings (user_id, glucose_mg_dl, reading_date, time_slot, notes)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.id, glucose, readingDate, timeSlot, notes],
+    );
+    return res.status(201).json({ reading: toReadingRow(rows[0]) });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(400).json({
+        error: `You already have a${/^[AEIOU]/.test(SLOT_SHORT[timeSlot]) ? 'n' : ''} ${SLOT_SHORT[timeSlot]} reading for this date.`,
+      });
+    }
+    console.error(err);
+    return res.status(500).json({ error: 'Could not save reading' });
+  }
 });
 
 app.put('/api/readings/:id', requireAuth, async (req, res) => {
   const parsed = parseReadingInput(req.body || {});
   if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const { glucose, mealContext, measuredAt, notes } = parsed.value;
-  const { rows } = await pool.query(
-    `UPDATE readings
-     SET glucose_mg_dl = $1, measured_at = $2, meal_context = $3, notes = $4,
-         updated_at = NOW()
-     WHERE id = $5 AND user_id = $6 RETURNING *`,
-    [glucose, measuredAt.toISOString(), mealContext, notes, req.params.id, req.user.id],
-  );
-  if (!rows[0]) return res.status(404).json({ error: 'Reading not found' });
-  return res.json({ reading: toReadingRow(rows[0]) });
+  const { glucose, timeSlot, readingDate, notes } = parsed.value;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE readings
+       SET glucose_mg_dl = $1, reading_date = $2, time_slot = $3, notes = $4,
+           updated_at = NOW()
+       WHERE id = $5 AND user_id = $6 RETURNING *`,
+      [glucose, readingDate, timeSlot, notes, req.params.id, req.user.id],
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Reading not found' });
+    return res.json({ reading: toReadingRow(rows[0]) });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(400).json({
+        error: `You already have a${/^[AEIOU]/.test(SLOT_SHORT[timeSlot]) ? 'n' : ''} ${SLOT_SHORT[timeSlot]} reading for this date.`,
+      });
+    }
+    console.error(err);
+    return res.status(500).json({ error: 'Could not save reading' });
+  }
 });
 
 app.delete('/api/readings/:id', requireAuth, async (req, res) => {
@@ -164,28 +226,29 @@ app.get('/api/stats', requireAuth, async (req, res) => {
     [req.user.id],
   );
   const last7 = await pool.query(
-    `SELECT DATE(measured_at) AS day, ROUND(AVG(glucose_mg_dl))::int AS avg,
+    `SELECT reading_date AS day, ROUND(AVG(glucose_mg_dl))::int AS avg,
             COUNT(*)::int AS count
      FROM readings
-     WHERE user_id = $1 AND measured_at >= NOW() - INTERVAL '7 days'
+     WHERE user_id = $1 AND reading_date >= CURRENT_DATE - INTERVAL '6 days'
      GROUP BY day ORDER BY day`,
     [req.user.id],
   );
   const recent = await pool.query(
-    'SELECT * FROM readings WHERE user_id = $1 ORDER BY measured_at DESC, id DESC LIMIT 10',
+    `SELECT * FROM readings WHERE user_id = $1
+     ORDER BY reading_date DESC, ${SLOT_ORDER_SQL} DESC LIMIT 10`,
     [req.user.id],
   );
   const today = await pool.query(
     `SELECT COUNT(*)::int AS count, ROUND(AVG(glucose_mg_dl))::int AS avg
      FROM readings
-     WHERE user_id = $1 AND DATE(measured_at) = CURRENT_DATE`,
+     WHERE user_id = $1 AND reading_date = CURRENT_DATE`,
     [req.user.id],
   );
   const last7agg = await pool.query(
     `SELECT COUNT(*)::int AS count, ROUND(AVG(glucose_mg_dl))::int AS avg,
             MIN(glucose_mg_dl)::int AS min, MAX(glucose_mg_dl)::int AS max
      FROM readings
-     WHERE user_id = $1 AND measured_at >= NOW() - INTERVAL '7 days'`,
+     WHERE user_id = $1 AND reading_date >= CURRENT_DATE - INTERVAL '6 days'`,
     [req.user.id],
   );
   return res.json({
@@ -205,26 +268,20 @@ app.get('/api/stats', requireAuth, async (req, res) => {
 // ------------------------------------------------------------- reports
 app.get('/api/reports/daily', requireAuth, async (req, res) => {
   const date = req.query.date; // YYYY-MM-DD
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+  if (!isValidDateString(date)) {
     return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   }
   const { rows } = await pool.query(
     `SELECT * FROM readings
-     WHERE user_id = $1 AND DATE(measured_at) = $2
-     ORDER BY measured_at ASC`,
+     WHERE user_id = $1 AND reading_date = $2
+     ORDER BY ${SLOT_ORDER_SQL} ASC`,
     [req.user.id, date],
   );
-  const values = rows.map((r) => r.glucose_mg_dl);
-  const summary =
-    values.length === 0
-      ? { count: 0, avg: null, min: null, max: null }
-      : {
-          count: values.length,
-          avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
-          min: Math.min(...values),
-          max: Math.max(...values),
-        };
-  return res.json({ date, readings: rows.map(toReadingRow), summary });
+  return res.json({
+    date,
+    readings: rows.map(toReadingRow),
+    summary: summaryOf(rows.map((r) => r.glucose_mg_dl)),
+  });
 });
 
 app.get('/api/reports/monthly', requireAuth, async (req, res) => {
@@ -234,25 +291,25 @@ app.get('/api/reports/monthly', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'year and month (1-12) are required' });
   }
   const { rows } = await pool.query(
-    `SELECT DATE(measured_at) AS day,
+    `SELECT reading_date AS day,
             COUNT(*)::int AS count,
-            ROUND(AVG(glucose_mg_dl))::int AS avg,
+            ROUND(AVG(glucose_mg_dl), 1)::float AS avg,
             MIN(glucose_mg_dl)::int AS min,
             MAX(glucose_mg_dl)::int AS max
      FROM readings
      WHERE user_id = $1
-       AND EXTRACT(YEAR FROM measured_at) = $2
-       AND EXTRACT(MONTH FROM measured_at) = $3
+       AND EXTRACT(YEAR FROM reading_date) = $2
+       AND EXTRACT(MONTH FROM reading_date) = $3
      GROUP BY day ORDER BY day`,
     [req.user.id, year, month],
   );
   const all = await pool.query(
-    `SELECT COUNT(*)::int AS count, ROUND(AVG(glucose_mg_dl))::int AS avg,
+    `SELECT COUNT(*)::int AS count, ROUND(AVG(glucose_mg_dl), 1)::float AS avg,
             MIN(glucose_mg_dl)::int AS min, MAX(glucose_mg_dl)::int AS max
      FROM readings
      WHERE user_id = $1
-       AND EXTRACT(YEAR FROM measured_at) = $2
-       AND EXTRACT(MONTH FROM measured_at) = $3`,
+       AND EXTRACT(YEAR FROM reading_date) = $2
+       AND EXTRACT(MONTH FROM reading_date) = $3`,
     [req.user.id, year, month],
   );
   const outOfRange = await pool.query(
@@ -260,8 +317,8 @@ app.get('/api/reports/monthly', requireAuth, async (req, res) => {
             COUNT(*) FILTER (WHERE glucose_mg_dl < 70)::int AS below70
      FROM readings
      WHERE user_id = $1
-       AND EXTRACT(YEAR FROM measured_at) = $2
-       AND EXTRACT(MONTH FROM measured_at) = $3`,
+       AND EXTRACT(YEAR FROM reading_date) = $2
+       AND EXTRACT(MONTH FROM reading_date) = $3`,
     [req.user.id, year, month],
   );
   return res.json({

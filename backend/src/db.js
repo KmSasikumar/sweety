@@ -9,6 +9,10 @@ const pool = new Pool({
   database: process.env.PGDATABASE || 'sweety',
 });
 
+// Kenpath's model: each reading has a date, one of 4 time slots and a
+// value in mg/dL. No free-form time of day — the slot is the time.
+// The UNIQUE constraint enforces "only one reading per slot per day"
+// at the database level as well as in the API.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -21,17 +25,18 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS readings (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  glucose_mg_dl INTEGER NOT NULL CHECK (glucose_mg_dl > 0 AND glucose_mg_dl < 1000),
-  measured_at TIMESTAMPTZ NOT NULL,
-  meal_context VARCHAR(30) NOT NULL DEFAULT 'fasting'
-    CHECK (meal_context IN ('fasting', 'before_meal', 'after_meal', 'bedtime', 'other')),
+  glucose_mg_dl INTEGER NOT NULL CHECK (glucose_mg_dl >= 40 AND glucose_mg_dl <= 600),
+  reading_date DATE NOT NULL,
+  time_slot VARCHAR(20) NOT NULL
+    CHECK (time_slot IN ('morning', 'after_breakfast', 'after_lunch', 'after_dinner')),
   notes TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, reading_date, time_slot)
 );
 
-CREATE INDEX IF NOT EXISTS readings_user_measured_idx
-  ON readings (user_id, measured_at DESC);
+CREATE INDEX IF NOT EXISTS readings_user_date_idx
+  ON readings (user_id, reading_date DESC);
 `;
 
 async function initDb() {

@@ -10,8 +10,8 @@ and review daily and monthly reports. Built as a hiring take-home for
 
 - **Authentication** — sign up, log in, log out; JWT-protected API routes
 - **Readings CRUD** — add, view, edit and delete glucose readings
-  (value in mg/dL, date/time, meal context — fasting / before meal / after meal /
-  bedtime / other — plus free-text notes)
+  (value in mg/dL, a date, and one of 4 time slots — Morning (fasting) /
+  After breakfast / After lunch / After dinner — plus free-text notes)
 - **Dashboard** — average / today / lowest / highest stats, 7-day average chart,
   recent readings
 - **Daily report** — every reading for a chosen day, with min / max / average
@@ -120,10 +120,11 @@ Seeded by `npm run seed` in `backend/`:
 - Email: `demo@sweety.app`
 - Password: `demo1234`
 
-The demo account comes with 35 readings across 14 days (29 Oct–11 Nov 2026),
-values 64–192 mg/dL — fasting mornings, after-lunch readings and bedtimes, with
-a couple of post-meal spikes above 180 and one low morning below 70, so the
-dashboard, daily report and monthly report all render with data immediately.
+The demo account comes with 49 readings across 14 days (29 Oct–11 Nov 2026),
+values 64–192 mg/dL — fasting mornings, after-breakfast, after-lunch and
+after-dinner readings, with a couple of post-meal spikes above 180 and one low
+morning below 70, so the dashboard, daily report and monthly report all render
+with data immediately.
 Every number is synthetic sample data — no real person's health data is in the repo.
 
 ## API reference

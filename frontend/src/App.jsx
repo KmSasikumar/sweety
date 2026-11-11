@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, isLoggedIn, setToken, MEAL_LABELS, formatDate, formatTime, todayISODate } from './api';
+import { api, isLoggedIn, setToken, SLOT_LABELS, TIME_SLOTS, formatDay, todayISODate } from './api';
 import BloodDrop from './components/Logo.jsx';
 import LineChart from './components/LineChart.jsx';
 import ReadingForm from './components/ReadingForm.jsx';
@@ -172,11 +172,11 @@ function ReadingRow({ reading, onEdit, onDelete, showActions = true }) {
         <span className="reading-value">
           {reading.glucose_mg_dl} <small>mg/dL</small>
         </span>
-        <span className={`meal-tag ${reading.meal_context}`}>
-          {MEAL_LABELS[reading.meal_context] || reading.meal_context}
+        <span className={`meal-tag ${reading.time_slot}`}>
+          {SLOT_LABELS[reading.time_slot] || reading.time_slot}
         </span>
         <div className="reading-meta">
-          {formatDate(reading.measured_at)} · {formatTime(reading.measured_at)}
+          {formatDay(reading.reading_date)}
         </div>
         {reading.notes && <div className="reading-note">{reading.notes}</div>}
       </div>
@@ -283,7 +283,7 @@ function Dashboard({ user, onViewAll, onLogReading, refreshKey }) {
                   <span className={`range-pill ${latestRange.cls}`}>{latestRange.text}</span>
                 )}
                 <div className="sub">
-                  {latest ? `${formatDate(latest.measured_at)} · ${formatTime(latest.measured_at)}` : 'No readings yet'}
+                  {latest ? `${formatDay(latest.reading_date)} · ${SLOT_LABELS[latest.time_slot]}` : 'No readings yet'}
                 </div>
               </div>
               <div className="stat-card">
@@ -359,7 +359,7 @@ function ReadingsView({ onEdit, onDelete, refreshKey }) {
   }, [load, refreshKey]);
 
   const shown = useMemo(
-    () => (filter === 'all' ? readings : readings.filter((r) => r.meal_context === filter)),
+    () => (filter === 'all' ? readings : readings.filter((r) => r.time_slot === filter)),
     [readings, filter],
   );
 
@@ -378,14 +378,14 @@ function ReadingsView({ onEdit, onDelete, refreshKey }) {
       </div>
 
       <div className="pills">
-        {['all', 'fasting', 'before_meal', 'after_meal', 'bedtime', 'other'].map((f) => (
+        {['all', ...TIME_SLOTS].map((f) => (
           <button
             key={f}
             className={`pill meal${filter === f ? ' active' : ''}`}
             data-meal={f}
             onClick={() => setFilter(f)}
           >
-            {f === 'all' ? 'All' : MEAL_LABELS[f]}
+            {f === 'all' ? 'All' : SLOT_LABELS[f]}
           </button>
         ))}
       </div>
@@ -434,7 +434,7 @@ function DailyReport() {
     if (!report) return [];
     const counts = {};
     report.readings.forEach((r) => {
-      counts[r.meal_context] = (counts[r.meal_context] || 0) + 1;
+      counts[r.time_slot] = (counts[r.time_slot] || 0) + 1;
     });
     const total = report.readings.length || 1;
     return Object.entries(counts)
@@ -488,19 +488,19 @@ function DailyReport() {
             <div className="stat-card">
               <div className="label">Readings</div>
               <div className="value">{report.summary.count}</div>
-              <div className="sub">{formatDate(report.date)}</div>
+              <div className="sub">{formatDay(report.date)}</div>
             </div>
           </div>
 
           <div className="card">
-            <h3>Meal context</h3>
+            <h3>Time slot</h3>
             <p className="hint">How the day&apos;s readings break down.</p>
             {breakdown.length === 0 ? (
               <p className="empty">No readings logged on this day.</p>
             ) : (
               breakdown.map((b) => (
                 <div className="breakdown-row" key={b.ctx}>
-                  <span className="ctx">{MEAL_LABELS[b.ctx] || b.ctx}</span>
+                  <span className="ctx">{SLOT_LABELS[b.ctx] || b.ctx}</span>
                   <span className="bar-track">
                     <span className="bar-fill" style={{ display: 'block', width: `${b.share}%` }} />
                   </span>
@@ -679,7 +679,7 @@ function MonthlyReport() {
                 <tbody>
                   {report.days.map((d) => (
                     <tr key={d.day}>
-                      <td>{formatDate(d.day)}</td>
+                      <td>{formatDay(d.day)}</td>
                       <td>{d.count}</td>
                       <td className="num">{d.avg} mg/dL</td>
                       <td>{d.min}</td>
