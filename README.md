@@ -172,6 +172,23 @@ Base URL: `http://localhost:4000/api` — all routes except signup/login need
 
 ## Notes
 
+### Assumptions
+
+- **Stack** — the assignment's stack is a Node.js + Express API, a
+  PostgreSQL database and a React frontend. MongoDB is not used: the
+  assignment names PostgreSQL as the database, so all users and readings
+  live there (there is no second database to keep in sync).
+- **A reading is (date, slot, value)** — the time of day is implied by
+  the slot (Morning ≈ early morning, After lunch ≈ early afternoon),
+  so no separate time field is stored.
+- **Dates are calendar dates** in the user's local timezone. The server
+  compares `reading_date` values as dates, not instants, so a reading
+  logged "today" stays "today" regardless of server timezone.
+- **"Monthly" means the whole previous month** relative to the selected
+  date (pick 15 Oct → 1–30 Sep), as in the assignment's example table.
+- **70–180 mg/dL is a display hint only** (the "In range / High / Low"
+  labels on the dashboard). It is not a medical threshold and plays no
+  part in validation; the validated range is 40–600 mg/dL.
 - **Validation** — readings are validated against Kenpath's rules in both
   the form and the API, with the assignment's exact error messages:
   value required ("Please enter a glucose value."), whole number 40–600
@@ -183,3 +200,19 @@ Base URL: `http://localhost:4000/api` — all routes except signup/login need
 - Readings are strictly per-user: every query is scoped by the JWT's user id.
 - No personal health data is included in this repo — the only readings are the
   synthetic seed data for the demo account.
+
+### What I'd improve with more time
+
+- **Tests** — API tests for the validation matrix (duplicate slot, 5th
+  reading, future date, out-of-range values) and React Testing Library
+  tests for the reading form, as the assignment's bonus tasks suggest.
+- **Pagination in the UI** — the API already supports `?limit=&offset=`
+  on `GET /readings`; the readings list should page through it instead
+  of loading the first 200.
+- **Docker** — a `docker-compose.yml` that starts PostgreSQL (and the
+  app) so setup is one command.
+- **Report caching** — cache report results and invalidate them when a
+  reading changes, instead of recomputing on every request.
+- **Reminders** — a daily reminder for users with fewer than 4 readings.
+- **Timezone handling** — record the user's timezone at signup and use
+  it explicitly for the "today" boundary instead of the server's date.
