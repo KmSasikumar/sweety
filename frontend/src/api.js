@@ -45,7 +45,8 @@ export const api = {
   stats: () => request('/stats'),
   dailyReport: (date) => request(`/reports/daily?date=${date}`),
   monthToDateReport: (date) => request(`/reports/month-to-date?date=${date}`),
-  monthlyReport: (year, month) => request(`/reports/monthly?year=${year}&month=${month}`),
+  // Monthly report covers the whole previous month relative to the date.
+  monthlyReport: (date) => request(`/reports/monthly?date=${date}`),
 };
 
 // Kenpath's 4 time slots.

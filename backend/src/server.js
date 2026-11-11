@@ -87,6 +87,20 @@ function summaryOf(values) {
   };
 }
 
+// First and last day (YYYY-MM-DD) of a month. month is 1-12.
+function monthRange(year, month) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const start = `${year}-${pad(month)}-01`;
+  const lastDay = new Date(year, month, 0).getDate(); // day 0 of next month
+  return { start, end: `${year}-${pad(month)}-${pad(lastDay)}` };
+}
+
+// The month before the given year/month.
+function prevMonth(year, month) {
+  const d = new Date(year, month - 2, 1);
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
 // ---------------------------------------------------------------- auth
 app.post('/api/auth/signup', async (req, res) => {
   const { name, email, password } = req.body || {};
@@ -284,12 +298,51 @@ app.get('/api/reports/daily', requireAuth, async (req, res) => {
   });
 });
 
-app.get('/api/reports/monthly', requireAuth, async (req, res) => {
-  const year = Number(req.query.year);
-  const month = Number(req.query.month); // 1-12
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-    return res.status(400).json({ error: 'year and month (1-12) are required' });
+app.get('/api/reports/month-to-date', requireAuth, async (req, res) => {
+  const date = req.query.date; // YYYY-MM-DD — the selected date
+  if (!isValidDateString(date)) {
+    return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   }
+  const [year, month] = date.split('-').map(Number);
+  const { start } = monthRange(year, month);
+  const end = date; // 1st of the month up to the selected date
+  const { rows } = await pool.query(
+    `SELECT * FROM readings
+     WHERE user_id = $1 AND reading_date >= $2 AND reading_date <= $3
+     ORDER BY reading_date ASC, ${SLOT_ORDER_SQL} ASC`,
+    [req.user.id, start, end],
+  );
+  const days = await pool.query(
+    `SELECT reading_date AS day,
+            COUNT(*)::int AS count,
+            ROUND(AVG(glucose_mg_dl), 1)::float AS avg,
+            MIN(glucose_mg_dl)::int AS min,
+            MAX(glucose_mg_dl)::int AS max
+     FROM readings
+     WHERE user_id = $1 AND reading_date >= $2 AND reading_date <= $3
+     GROUP BY day ORDER BY day`,
+    [req.user.id, start, end],
+  );
+  return res.json({
+    date,
+    start,
+    end,
+    readings: rows.map(toReadingRow),
+    days: days.rows,
+    summary: summaryOf(rows.map((r) => r.glucose_mg_dl)),
+  });
+});
+
+app.get('/api/reports/monthly', requireAuth, async (req, res) => {
+  // Monthly report covers the WHOLE PREVIOUS MONTH relative to the
+  // selected date: selected 15 Oct 2026 -> 1 Sep - 30 Sep 2026.
+  const date = req.query.date; // YYYY-MM-DD — the selected date
+  if (!isValidDateString(date)) {
+    return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  }
+  const [year, month] = date.split('-').map(Number);
+  const prev = prevMonth(year, month);
+  const { start, end } = monthRange(prev.year, prev.month);
   const { rows } = await pool.query(
     `SELECT reading_date AS day,
             COUNT(*)::int AS count,
@@ -297,33 +350,30 @@ app.get('/api/reports/monthly', requireAuth, async (req, res) => {
             MIN(glucose_mg_dl)::int AS min,
             MAX(glucose_mg_dl)::int AS max
      FROM readings
-     WHERE user_id = $1
-       AND EXTRACT(YEAR FROM reading_date) = $2
-       AND EXTRACT(MONTH FROM reading_date) = $3
+     WHERE user_id = $1 AND reading_date >= $2 AND reading_date <= $3
      GROUP BY day ORDER BY day`,
-    [req.user.id, year, month],
+    [req.user.id, start, end],
   );
   const all = await pool.query(
     `SELECT COUNT(*)::int AS count, ROUND(AVG(glucose_mg_dl), 1)::float AS avg,
             MIN(glucose_mg_dl)::int AS min, MAX(glucose_mg_dl)::int AS max
      FROM readings
-     WHERE user_id = $1
-       AND EXTRACT(YEAR FROM reading_date) = $2
-       AND EXTRACT(MONTH FROM reading_date) = $3`,
-    [req.user.id, year, month],
+     WHERE user_id = $1 AND reading_date >= $2 AND reading_date <= $3`,
+    [req.user.id, start, end],
   );
   const outOfRange = await pool.query(
     `SELECT COUNT(*) FILTER (WHERE glucose_mg_dl > 180)::int AS above180,
             COUNT(*) FILTER (WHERE glucose_mg_dl < 70)::int AS below70
      FROM readings
-     WHERE user_id = $1
-       AND EXTRACT(YEAR FROM reading_date) = $2
-       AND EXTRACT(MONTH FROM reading_date) = $3`,
-    [req.user.id, year, month],
+     WHERE user_id = $1 AND reading_date >= $2 AND reading_date <= $3`,
+    [req.user.id, start, end],
   );
   return res.json({
-    year,
-    month,
+    date,
+    year: prev.year,
+    month: prev.month,
+    start,
+    end,
     days: rows,
     summary: {
       count: all.rows[0].count,

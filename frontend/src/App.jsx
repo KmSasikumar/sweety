@@ -8,6 +8,7 @@ const VIEWS = {
   dashboard: 'Dashboard',
   readings: 'Readings',
   daily: 'Daily report',
+  'month-to-date': 'Month-to-date report',
   monthly: 'Monthly report',
 };
 
@@ -29,9 +30,14 @@ function addDays(isoDate, delta) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function shiftMonth(year, month, delta) {
-  const d = new Date(year, month - 1 + delta, 1);
-  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+// Step a YYYY-MM-DD date by whole months, clamping the day (e.g. 31 Mar -> 30 Apr).
+function addMonths(isoDate, delta) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const target = new Date(y, m - 1 + delta, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const day = Math.min(d, lastDay);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(day)}`;
 }
 
 const NAV_ICONS = {
@@ -65,6 +71,14 @@ const NAV_ICONS = {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
       <polyline points="16 7 22 7 22 13" />
+    </svg>
+  ),
+  'month-to-date': (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <line x1="8" y1="14" x2="12" y2="14" />
+      <line x1="8" y1="18" x2="16" y2="18" />
     </svg>
   ),
 };
@@ -526,18 +540,16 @@ function DailyReport() {
   );
 }
 
-function MonthlyReport() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+function MonthToDateReport() {
+  const [date, setDate] = useState(todayISODate());
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const load = useCallback(async (y, m) => {
+  const load = useCallback(async (d) => {
     setLoading(true);
     try {
-      const data = await api.monthlyReport(y, m);
+      const data = await api.monthToDateReport(d);
       setReport(data);
       setError('');
     } catch (err) {
@@ -548,65 +560,158 @@ function MonthlyReport() {
   }, []);
 
   useEffect(() => {
-    load(year, month);
-  }, [year, month, load]);
+    load(date);
+  }, [date, load]);
 
-  const monthName = new Date(year, month - 1, 1).toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
+  const rangeLabel = report
+    ? `${formatDay(report.start)} – ${formatDay(report.end)}`
+    : '';
+
+  return (
+    <div>
+      <div className="greeting">
+        <h2>Month-to-date report</h2>
+        <p>From the 1st of the month up to the selected date.</p>
+      </div>
+
+      <div className="date-nav">
+        <button className="arrow-btn" onClick={() => setDate((d) => addDays(d, -1))} aria-label="Previous day">
+          ‹
+        </button>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <button className="arrow-btn" onClick={() => setDate((d) => addDays(d, 1))} aria-label="Next day">
+          ›
+        </button>
+      </div>
+
+      {error && <div className="error" style={{ marginBottom: 14 }}>{error}</div>}
+
+      {loading ? (
+        <p className="empty">Loading…</p>
+      ) : report ? (
+        <>
+          <div className="stats-grid">
+            <div className="stat-card">
+              <div className="label">Low</div>
+              <div className="value blue">{report.summary.min ?? '—'} <small>mg/dL</small></div>
+              <div className="sub">{rangeLabel}</div>
+            </div>
+            <div className="stat-card">
+              <div className="label">Average</div>
+              <div className="value">{report.summary.avg ?? '—'} <small>mg/dL</small></div>
+              <div className="sub">{report.summary.count} reading(s)</div>
+            </div>
+            <div className="stat-card">
+              <div className="label">High</div>
+              <div className="value red">{report.summary.max ?? '—'} <small>mg/dL</small></div>
+              <div className="sub">{rangeLabel}</div>
+            </div>
+            <div className="stat-card">
+              <div className="label">Days tracked</div>
+              <div className="value">{report.days.length}</div>
+              <div className="sub">{rangeLabel}</div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>Day by day</h3>
+            {report.days.length === 0 ? (
+              <p className="empty">No readings logged so far this month.</p>
+            ) : (
+              <table className="report-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Readings</th>
+                    <th>Average</th>
+                    <th>Low</th>
+                    <th>High</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.days.map((d) => (
+                    <tr key={d.day}>
+                      <td>{formatDay(d.day)}</td>
+                      <td>{d.count}</td>
+                      <td className="num">{d.avg} mg/dL</td>
+                      <td>{d.min}</td>
+                      <td>{d.max}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>Readings</h3>
+            {report.readings.length === 0 ? (
+              <p className="empty">No readings logged so far this month.</p>
+            ) : (
+              report.readings.map((r) => <ReadingRow key={r.id} reading={r} showActions={false} />)
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function MonthlyReport() {
+  const [date, setDate] = useState(todayISODate());
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (d) => {
+    setLoading(true);
+    try {
+      const data = await api.monthlyReport(d);
+      setReport(data);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(date);
+  }, [date, load]);
+
+  const monthName = report
+    ? new Date(report.year, report.month - 1, 1).toLocaleDateString('en-IN', {
+        month: 'long',
+        year: 'numeric',
+      })
+    : '';
+  const rangeLabel = report ? `${formatDay(report.start)} – ${formatDay(report.end)}` : '';
 
   const chartPoints = (report?.days || []).map((d) => ({
     label: String(new Date(d.day).getDate()),
     value: d.avg,
   }));
 
-  const monthOptions = [];
-  for (let m = 1; m <= 12; m += 1) {
-    monthOptions.push(
-      <option key={m} value={m}>
-        {new Date(2000, m - 1, 1).toLocaleDateString('en-IN', { month: 'long' })}
-      </option>,
-    );
-  }
-  const yearOptions = [now.getFullYear(), now.getFullYear() - 1].map((y) => (
-    <option key={y} value={y}>
-      {y}
-    </option>
-  ));
-
   return (
     <div>
       <div className="greeting">
         <h2>Monthly report</h2>
-        <p>Daily averages across the month, with a month summary.</p>
+        <p>The whole previous month, relative to the selected date.</p>
       </div>
 
       <div className="date-nav">
         <button
           className="arrow-btn"
-          onClick={() => {
-            const s = shiftMonth(year, month, -1);
-            setYear(s.year);
-            setMonth(s.month);
-          }}
+          onClick={() => setDate((d) => addMonths(d, -1))}
           aria-label="Previous month"
         >
           ‹
         </button>
-        <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-          {monthOptions}
-        </select>
-        <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-          {yearOptions}
-        </select>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <button
           className="arrow-btn"
-          onClick={() => {
-            const s = shiftMonth(year, month, 1);
-            setYear(s.year);
-            setMonth(s.month);
-          }}
+          onClick={() => setDate((d) => addMonths(d, 1))}
           aria-label="Next month"
         >
           ›
@@ -635,12 +740,12 @@ function MonthlyReport() {
             <div className="stat-card">
               <div className="label">Low</div>
               <div className="value blue">{report.summary.min ?? '—'} <small>mg/dL</small></div>
-              <div className="sub">this month</div>
+              <div className="sub">{rangeLabel}</div>
             </div>
             <div className="stat-card">
               <div className="label">High</div>
               <div className="value red">{report.summary.max ?? '—'} <small>mg/dL</small></div>
-              <div className="sub">this month</div>
+              <div className="sub">{rangeLabel}</div>
             </div>
           </div>
 
@@ -806,6 +911,8 @@ export default function App() {
           </div>
         ) : view === 'daily' ? (
           <DailyReport />
+        ) : view === 'month-to-date' ? (
+          <MonthToDateReport />
         ) : (
           <MonthlyReport />
         )}

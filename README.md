@@ -15,9 +15,12 @@ and review daily and monthly reports. Built as a hiring take-home for
 - **Dashboard** — average / today / lowest / highest stats, 7-day average chart,
   recent readings
 - **Daily report** — every reading for a chosen day, with min / max / average
-  and a through-the-day chart
-- **Monthly report** — daily averages as a bar chart plus a day-by-day table
-  (count, average, low, high) and a month summary
+  (1 decimal) and a time-slot breakdown
+- **Month-to-date report** — 1st of the month up to the chosen date, with
+  min / max / average, a day-by-day table and the readings list
+- **Monthly report** — the whole previous month relative to the chosen date
+  (e.g. pick 15 Oct → 1–30 Sep), with daily averages as a chart plus a
+  day-by-day table and a month summary
 - **Seed data** — a demo account with 2 weeks of realistic readings so the
   reports have content from day one
 
@@ -143,7 +146,8 @@ Base URL: `http://localhost:4000/api` — all routes except signup/login need
 | DELETE | `/readings/:id`          | Delete a reading                               |
 | GET    | `/stats`                 | Totals, averages, last-7-days, recent readings |
 | GET    | `/reports/daily?date=`   | Readings + summary for `YYYY-MM-DD`            |
-| GET    | `/reports/monthly?year=&month=` | Daily averages + summary for a month    |
+| GET    | `/reports/month-to-date?date=` | Summary + days + readings, 1st → `date`  |
+| GET    | `/reports/monthly?date=` | Daily averages + summary for the whole previous month |
 | GET    | `/health`                | Health check                                   |
 
 ## Environment variables (backend)
