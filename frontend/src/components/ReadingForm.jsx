@@ -76,12 +76,11 @@ export default function ReadingForm({ initial, onSubmit, onCancel, busy }) {
           value={glucose}
           onChange={(e) => setGlucose(e.target.value)}
           placeholder="e.g. 112"
-          required
         />
       </div>
       <div className="field">
         <label htmlFor="rdate">Date</label>
-        <input id="rdate" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        <input id="rdate" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
       <div className="field">
         <label>Time slot</label>
