@@ -99,11 +99,19 @@ Tables are created automatically when the backend first starts.
 
 ```bash
 cd backend
-cp .env.example .env        # adjust PGHOST/PGPORT/PGUSER/PGPASSWORD if needed
+cp ../.env.example .env     # all variables are listed in .env.example at the repo root
 npm install
 npm run seed                # creates demo@sweety.app / demo1234 + 2 weeks of readings
 npm start                   # API on http://localhost:4000
 ```
+
+### Seed data
+
+`backend/src/seed.js` (run with `npm run seed` in `backend/`) creates the
+demo user `demo@sweety.app` / `demo1234` and 2 weeks of realistic sample
+readings across the 4 time slots (49 readings, values 64–192 mg/dL). It is
+deterministic — re-running it wipes the demo user's readings and recreates
+the same set — so it is safe to run again after resetting the database.
 
 ### 3. Frontend
 
