@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { TIME_SLOTS, SLOT_LABELS } from '../api';
+import { api, TIME_SLOTS, SLOT_LABELS, SLOT_SHORT, slotArticle } from '../api';
 
 export default function ReadingForm({ initial, onSubmit, onCancel, busy }) {
   const [glucose, setGlucose] = useState(initial ? String(initial.glucose_mg_dl) : '');
@@ -9,17 +9,52 @@ export default function ReadingForm({ initial, onSubmit, onCancel, busy }) {
   const [timeSlot, setTimeSlot] = useState(initial ? initial.time_slot : 'morning');
   const [notes, setNotes] = useState(initial ? initial.notes || '' : '');
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
 
-  function handleSubmit(e) {
+  // The same Kenpath rules as the API, with the same messages, so the
+  // user gets instant feedback and the server stays the final authority.
+  async function handleSubmit(e) {
     e.preventDefault();
+    if (glucose.trim() === '') {
+      setError('Please enter a glucose value.');
+      return;
+    }
     const value = Number(glucose);
-    if (!Number.isInteger(value)) {
-      setError('Enter a whole number for glucose.');
+    if (!Number.isInteger(value) || value < 40 || value > 600) {
+      setError('Value must be between 40 and 600 mg/dl.');
       return;
     }
     if (!date) {
-      setError('Pick a date.');
+      setError('Please pick a date.');
       return;
+    }
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    if (date > todayStr) {
+      setError('Date cannot be in the future.');
+      return;
+    }
+    // One reading per slot per day, max 4 per day: check against the
+    // readings already logged for this date (excluding the one being edited).
+    setChecking(true);
+    try {
+      const day = await api.dailyReport(date);
+      const others = day.readings.filter((r) => r.id !== initial?.id);
+      if (others.length >= 4) {
+        setError('You can add only 4 readings per day.');
+        return;
+      }
+      if (others.some((r) => r.time_slot === timeSlot)) {
+        setError(
+          `You already have ${slotArticle(timeSlot)} ${SLOT_SHORT[timeSlot]} reading for this date.`,
+        );
+        return;
+      }
+    } catch (err) {
+      // If the day's readings cannot be loaded, let the server decide.
+    } finally {
+      setChecking(false);
     }
     setError('');
     onSubmit({
@@ -79,8 +114,8 @@ export default function ReadingForm({ initial, onSubmit, onCancel, busy }) {
         <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button className="btn" type="submit" disabled={busy}>
-          {initial ? 'Save changes' : 'Save reading'}
+        <button className="btn" type="submit" disabled={busy || checking}>
+          {checking ? 'Checking…' : initial ? 'Save changes' : 'Save reading'}
         </button>
       </div>
     </form>

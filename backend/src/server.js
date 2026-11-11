@@ -39,25 +39,51 @@ function isValidDateString(s) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
 }
 
-// Shape validation for a reading payload. The full Kenpath validation
-// rules (required value, 40–600 range, future date, one per slot per day,
-// max 4 per day) live in validateReading(); this only checks the payload
-// has the right shape so the DB is never hit with garbage.
-function parseReadingInput(body) {
-  const glucose = Number(body.glucose_mg_dl);
-  const timeSlot = TIME_SLOTS.includes(body.time_slot) ? body.time_slot : null;
-  const readingDate = isValidDateString(body.reading_date) ? body.reading_date : null;
+// Kenpath's validation rules, with the exact error messages from the
+// assignment. Order: required -> range -> future date -> max 4 per day ->
+// one per slot per day. (Max is checked before duplicate so that adding
+// a 5th reading to a full day reports the max rule, not the duplicate.)
+// excludeId is the reading being edited, so an edit that keeps its own
+// date/slot does not trip the duplicate or max checks.
+async function validateReading(body, userId, excludeId) {
+  const raw = body.glucose_mg_dl;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return { error: 'Please enter a glucose value.' };
+  }
+  const glucose = Number(raw);
+  if (!Number.isInteger(glucose) || glucose < 40 || glucose > 600) {
+    return { error: 'Value must be between 40 and 600 mg/dl.' };
+  }
+  if (!isValidDateString(body.reading_date)) {
+    return { error: 'Please pick a valid date.' };
+  }
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  if (body.reading_date > todayStr) {
+    return { error: 'Date cannot be in the future.' };
+  }
+  if (!TIME_SLOTS.includes(body.time_slot)) {
+    return { error: 'Please pick a time slot.' };
+  }
   const notes = typeof body.notes === 'string' ? body.notes.slice(0, 500) : '';
-  if (!Number.isInteger(glucose)) {
-    return { error: 'glucose_mg_dl must be a whole number' };
+  const dayCount = await pool.query(
+    'SELECT COUNT(*)::int AS count FROM readings WHERE user_id = $1 AND reading_date = $2 AND id <> $3',
+    [userId, body.reading_date, excludeId || 0],
+  );
+  if (dayCount.rows[0].count >= 4) {
+    return { error: 'You can add only 4 readings per day.' };
   }
-  if (!timeSlot) {
-    return { error: 'time_slot must be one of: morning, after_breakfast, after_lunch, after_dinner' };
+  const dup = await pool.query(
+    'SELECT id FROM readings WHERE user_id = $1 AND reading_date = $2 AND time_slot = $3 AND id <> $4',
+    [userId, body.reading_date, body.time_slot, excludeId || 0],
+  );
+  if (dup.rows[0]) {
+    const short = SLOT_SHORT[body.time_slot];
+    const article = /^[AEIOU]/.test(short) ? 'an' : 'a';
+    return { error: `You already have ${article} ${short} reading for this date.` };
   }
-  if (!readingDate) {
-    return { error: 'reading_date must be YYYY-MM-DD' };
-  }
-  return { value: { glucose, timeSlot, readingDate, notes } };
+  return { value: { glucose, timeSlot: body.time_slot, readingDate: body.reading_date, notes } };
 }
 
 function toReadingRow(row) {
@@ -174,9 +200,9 @@ app.get('/api/readings', requireAuth, async (req, res) => {
 });
 
 app.post('/api/readings', requireAuth, async (req, res) => {
-  const parsed = parseReadingInput(req.body || {});
-  if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const { glucose, timeSlot, readingDate, notes } = parsed.value;
+  const validated = await validateReading(req.body || {}, req.user.id, null);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+  const { glucose, timeSlot, readingDate, notes } = validated.value;
   try {
     const { rows } = await pool.query(
       `INSERT INTO readings (user_id, glucose_mg_dl, reading_date, time_slot, notes)
@@ -196,9 +222,9 @@ app.post('/api/readings', requireAuth, async (req, res) => {
 });
 
 app.put('/api/readings/:id', requireAuth, async (req, res) => {
-  const parsed = parseReadingInput(req.body || {});
-  if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const { glucose, timeSlot, readingDate, notes } = parsed.value;
+  const validated = await validateReading(req.body || {}, req.user.id, req.params.id);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+  const { glucose, timeSlot, readingDate, notes } = validated.value;
   try {
     const { rows } = await pool.query(
       `UPDATE readings

@@ -164,7 +164,14 @@ Base URL: `http://localhost:4000/api` — all routes except signup/login need
 
 ## Notes
 
-- Glucose values are validated server-side (integer, 1–999 mg/dL).
+- **Validation** — readings are validated against Kenpath's rules in both
+  the form and the API, with the assignment's exact error messages:
+  value required ("Please enter a glucose value."), whole number 40–600
+  ("Value must be between 40 and 600 mg/dl."), one reading per slot per
+  day ("You already have an After lunch reading for this date."), max 4
+  per day ("You can add only 4 readings per day.") and no future dates
+  ("Date cannot be in the future."). The database also enforces the
+  40–600 range and one-per-slot-per-day with constraints.
 - Readings are strictly per-user: every query is scoped by the JWT's user id.
 - No personal health data is included in this repo — the only readings are the
   synthetic seed data for the demo account.
