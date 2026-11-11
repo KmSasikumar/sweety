@@ -1,0 +1,165 @@
+# Sweety — Blood Glucose Tracker
+
+A full-stack blood glucose tracker. Log readings, see trends on a dashboard,
+and review daily and monthly reports. Built as a hiring take-home for
+**Kenpath Technologies**.
+
+> For personal tracking and trend review only — not medical advice.
+
+## What it does
+
+- **Authentication** — sign up, log in, log out; JWT-protected API routes
+- **Readings CRUD** — add, view, edit and delete glucose readings
+  (value in mg/dL, date/time, meal context — fasting / before meal / after meal /
+  bedtime / other — plus free-text notes)
+- **Dashboard** — average / today / lowest / highest stats, 7-day average chart,
+  recent readings
+- **Daily report** — every reading for a chosen day, with min / max / average
+  and a through-the-day chart
+- **Monthly report** — daily averages as a bar chart plus a day-by-day table
+  (count, average, low, high) and a month summary
+- **Seed data** — a demo account with 2 weeks of realistic readings so the
+  reports have content from day one
+
+## Tech stack
+
+| Layer    | Technology                                    |
+| -------- | --------------------------------------------- |
+| Frontend | React 18 + Vite                               |
+| Backend  | Node.js + Express                             |
+| Database | **PostgreSQL** (all readings + users live here) |
+| Auth     | bcrypt password hashing + JWT                 |
+
+## Project structure
+
+```
+sweety/
+├── backend/
+│   ├── src/
+│   │   ├── server.js      # Express app: auth, readings CRUD, stats, reports
+│   │   ├── db.js          # PostgreSQL pool + schema
+│   │   ├── auth.js        # JWT sign/verify middleware
+│   │   └── seed.js        # Demo user + 2 weeks of sample readings
+│   ├── .env.example
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx        # Auth, dashboard, daily + monthly reports
+│   │   ├── api.js         # API client
+│   │   ├── index.css      # Clean minimal styling
+│   │   └── components/    # Logo, SVG line chart, reading form
+│   ├── index.html
+│   ├── vite.config.js     # Dev proxy: /api -> localhost:4000
+│   └── package.json
+└── README.md
+```
+
+## Prerequisites
+
+- Node.js 18+ and npm
+- PostgreSQL 14+ running locally
+
+## Setup
+
+### 1. Database
+
+Create the database and user (defaults match `backend/.env.example`):
+
+```sql
+-- as the postgres superuser:
+CREATE USER sweety WITH PASSWORD 'sweety';
+CREATE DATABASE sweety OWNER sweety;
+```
+
+Or with one command:
+
+```bash
+sudo -u postgres psql -c "CREATE USER sweety WITH PASSWORD 'sweety';"
+sudo -u postgres psql -c "CREATE DATABASE sweety OWNER sweety;"
+```
+
+Or with Docker:
+
+```bash
+docker run --name sweety-pg -e POSTGRES_USER=sweety -e POSTGRES_PASSWORD=sweety \
+  -e POSTGRES_DB=sweety -p 5432:5432 -d postgres:16
+```
+
+No install at all is also possible: `pip install pgserver` bundles real
+PostgreSQL binaries and can init/start a local cluster on 127.0.0.1:5432.
+(This is how the app was developed and tested in this repo's sandbox, where
+the Ubuntu apt mirrors were unreachable.)
+
+Tables are created automatically when the backend first starts.
+
+### 2. Backend
+
+```bash
+cd backend
+cp .env.example .env        # adjust PGHOST/PGPORT/PGUSER/PGPASSWORD if needed
+npm install
+npm run seed                # creates demo@sweety.app / demo1234 + 2 weeks of readings
+npm start                   # API on http://localhost:4000
+```
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                 # app on http://localhost:5173
+```
+
+The Vite dev server proxies `/api` to the backend, so no CORS setup is needed
+in development.
+
+## Demo account
+
+Seeded by `npm run seed` in `backend/`:
+
+- Email: `demo@sweety.app`
+- Password: `demo1234`
+
+The demo account comes with 35 readings across 14 days (29 Oct–11 Nov 2026),
+values 64–192 mg/dL — fasting mornings, after-lunch readings and bedtimes, with
+a couple of post-meal spikes above 180 and one low morning below 70, so the
+dashboard, daily report and monthly report all render with data immediately.
+Every number is synthetic sample data — no real person's health data is in the repo.
+
+## API reference
+
+Base URL: `http://localhost:4000/api` — all routes except signup/login need
+`Authorization: Bearer <token>`.
+
+| Method | Route                    | Description                                    |
+| ------ | ------------------------ | ---------------------------------------------- |
+| POST   | `/auth/signup`           | Create account → `{ token, user }`             |
+| POST   | `/auth/login`            | Log in → `{ token, user }`                     |
+| GET    | `/auth/me`               | Current user                                   |
+| GET    | `/readings?limit&offset` | List readings, newest first                    |
+| POST   | `/readings`              | Add a reading                                  |
+| PUT    | `/readings/:id`          | Update a reading                               |
+| DELETE | `/readings/:id`          | Delete a reading                               |
+| GET    | `/stats`                 | Totals, averages, last-7-days, recent readings |
+| GET    | `/reports/daily?date=`   | Readings + summary for `YYYY-MM-DD`            |
+| GET    | `/reports/monthly?year=&month=` | Daily averages + summary for a month    |
+| GET    | `/health`                | Health check                                   |
+
+## Environment variables (backend)
+
+| Variable     | Default   | Description                  |
+| ------------ | --------- | ---------------------------- |
+| `PORT`       | `4000`    | API port                     |
+| `PGHOST`     | `localhost` | PostgreSQL host            |
+| `PGPORT`     | `5432`    | PostgreSQL port              |
+| `PGUSER`     | `sweety`  | PostgreSQL user              |
+| `PGPASSWORD` | `sweety`  | PostgreSQL password          |
+| `PGDATABASE` | `sweety`  | PostgreSQL database          |
+| `JWT_SECRET` | —         | Secret for signing JWTs (change in production) |
+
+## Notes
+
+- Glucose values are validated server-side (integer, 1–999 mg/dL).
+- Readings are strictly per-user: every query is scoped by the JWT's user id.
+- No personal health data is included in this repo — the only readings are the
+  synthetic seed data for the demo account.
